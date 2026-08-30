@@ -189,6 +189,7 @@ export interface AppSettings {
   db_path: string;
   theme: string;
   app_version: string;
+  paper_types: string[];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

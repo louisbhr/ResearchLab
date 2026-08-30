@@ -62,6 +62,7 @@ pub fn run() {
             commands::settings::get_api_key,
             commands::settings::save_setting,
             commands::settings::test_api_connection,
+            commands::settings::save_paper_types,
             // Analytics
             commands::analytics::get_analytics,
             // Recommendations

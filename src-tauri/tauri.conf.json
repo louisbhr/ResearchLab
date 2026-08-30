@@ -37,18 +37,8 @@
     ]
   },
   "plugins": {
-    "fs": {
-      "scope": {
-        "allow": ["$APPDATA/**", "$APPCONFIG/**", "$APPLOCALDATA/**", "$DOWNLOAD/**", "$DOCUMENT/**", "$HOME/**"]
-      }
-    },
     "shell": {
       "open": true
-    },
-    "http": {
-      "scope": {
-        "allow": ["https://**", "http://**"]
-      }
     }
   }
 }
