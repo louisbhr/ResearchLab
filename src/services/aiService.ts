@@ -1,13 +1,13 @@
+import { fetch } from '@tauri-apps/plugin-http';
 import type { Paper, Tag, AIAnalysisResult, AIAnalysisTag } from '../types';
 import { PAPER_TYPES } from '../types';
-import { getApiKey } from './tauriApi';
+import { getApiKey, getSettings } from './tauriApi';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
 
 const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
-const CLAUDE_MODEL = 'claude-sonnet-4-6';
 const ANTHROPIC_VERSION = '2023-06-01';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -42,9 +42,11 @@ async function callClaude(
   maxTokens = 2048,
 ): Promise<string> {
   const apiKey = await requireApiKey();
+  const settings = await getSettings();
+  const model = settings.claude_model || 'claude-sonnet-4-6';
 
   const body: ClaudeRequestBody = {
-    model: CLAUDE_MODEL,
+    model,
     max_tokens: maxTokens,
     system: systemPrompt,
     messages: [{ role: 'user', content: userMessage }],
@@ -122,8 +124,9 @@ export async function analyzeImportedPaper(
     journal?: string | null;
   },
   existingTags: Tag[],
+  customPaperTypes?: string[],
 ): Promise<AIAnalysisResult> {
-  const validPaperTypes = PAPER_TYPES.join(', ');
+  const validPaperTypes = (customPaperTypes ?? PAPER_TYPES as unknown as string[]).join(', ');
   const existingTagNames = existingTags.map((t) => t.name).join(', ') || 'none';
 
   const systemPrompt = `You are a research paper analysis assistant. Your job is to analyse academic papers and return structured metadata suggestions in JSON format.
@@ -176,9 +179,10 @@ Abstract: ${paper.abstract_text ?? 'No abstract available.'}`;
   }>(raw);
 
   // Validate and sanitise
-  const validType = (PAPER_TYPES as readonly string[]).includes(parsed.paperType)
+  const allowedTypes = customPaperTypes ?? (PAPER_TYPES as unknown as string[]);
+  const validType = allowedTypes.includes(parsed.paperType)
     ? parsed.paperType
-    : 'Other';
+    : (allowedTypes[allowedTypes.length - 1] ?? 'Other');
 
   const tags: AIAnalysisTag[] = (parsed.tags ?? []).map((t) => ({
     name: String(t.name ?? '').trim(),

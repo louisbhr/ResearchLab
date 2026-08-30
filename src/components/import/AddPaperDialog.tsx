@@ -22,7 +22,7 @@ export default function AddPaperDialog({ open = true, onClose }: AddPaperDialogP
   if (!open) return null;
   const [tab, setTab] = useState<Tab>("doi");
   const [step, setStep] = useState<Step>("input");
-  const { createPaper, tags, settings, loadPapers, loadTags } = useAppStore();
+  const { createPaper, tags, settings, loadPapers, loadTags, activeProjectId } = useAppStore();
 
   // DOI state
   const [doi, setDoi] = useState("");
@@ -55,6 +55,9 @@ export default function AddPaperDialog({ open = true, onClose }: AddPaperDialogP
       const p = await api.fetchDoiPreview(doi.trim());
       setPreview(p);
       setStep("preview");
+      if (settings?.claude_api_key_set && p.title) {
+        handleRunAI(p.title, p.abstract_text || "", p.authors || [], p.year, p.journal);
+      }
     } catch (e: any) {
       setError(e.message || "Failed to fetch DOI metadata.");
     } finally {
@@ -72,19 +75,27 @@ export default function AddPaperDialog({ open = true, onClose }: AddPaperDialogP
       const p = await api.parsePdf(selected);
       setPreview(p);
       setStep("preview");
+      if (settings?.claude_api_key_set && p.title) {
+        handleRunAI(p.title, p.abstract_text || "", p.authors || [], p.year, p.journal);
+      }
     } catch (e: any) {
       setError(e.message || "Failed to process PDF.");
     }
   };
 
-  const handleRunAI = async (titleVal: string, abstractVal: string, authors: string[]) => {
+  const handleRunAI = async (titleVal: string, abstractVal: string, authors: string[], year?: number | null, journal?: string | null) => {
     if (!settings?.claude_api_key_set) return;
     setAiLoading(true);
+    setError(null);
     try {
-      const result = await analyzeImportedPaper({ title: titleVal, abstract_text: abstractVal, authors, year: mergedPreview.year, journal: mergedPreview.journal }, tags);
+      const result = await analyzeImportedPaper(
+        { title: titleVal, abstract_text: abstractVal, authors, year: year ?? mergedPreview.year, journal: journal ?? mergedPreview.journal },
+        tags,
+        settings?.paper_types,
+      );
       setAiResult(result);
-    } catch (e) {
-      console.error("AI analysis failed:", e);
+    } catch (e: any) {
+      setError(`AI analysis failed: ${e?.message ?? e}`);
     } finally {
       setAiLoading(false);
     }
@@ -121,14 +132,14 @@ export default function AddPaperDialog({ open = true, onClose }: AddPaperDialogP
         source_type: tab === "doi" ? "DOI" : tab === "pdf" ? "PDF" : "Manual",
         paper_type: aiResult?.paperType || (tab === "manual" ? manual.paper_type || undefined : undefined),
         reading_status: tab === "manual" ? manual.reading_status : "Unread",
-        relevance_rating: aiResult?.relevanceSuggestion?.rating || (tab === "manual" ? manual.relevance_rating : undefined),
+        relevance_rating: aiResult?.relevanceSuggestion || (tab === "manual" ? manual.relevance_rating : undefined),
         short_summary: aiResult?.shortSummary || undefined,
         key_findings: aiResult?.keyFindings || undefined,
         tags: tagInputs,
         ai_analysis_status: aiResult ? "Complete" : "Pending",
         favorite: false,
         personal_notes: tab === "manual" ? manual.personal_notes || undefined : undefined,
-        project_ids: [],
+        project_ids: activeProjectId !== 'all' ? [activeProjectId] : [],
       });
 
       await loadPapers();
@@ -157,7 +168,7 @@ export default function AddPaperDialog({ open = true, onClose }: AddPaperDialogP
         step === "preview" || tab === "manual" ? (
           <>
             <Button variant="secondary" onClick={() => { setStep("input"); setError(null); }}>Back</Button>
-            {!aiResult && settings?.claude_api_key_set && (
+            {!aiResult && !aiLoading && settings?.claude_api_key_set && (
               <Button
                 variant="outline"
                 loading={aiLoading}
@@ -255,7 +266,7 @@ export default function AddPaperDialog({ open = true, onClose }: AddPaperDialogP
               label="Paper Type"
               value={manual.paper_type}
               onChange={e => setManual(m => ({ ...m, paper_type: e.target.value }))}
-              options={[{ value: "", label: "— Select —" }, ...PAPER_TYPES.map(t => ({ value: t, label: t }))]}
+              options={[{ value: "", label: "— Select —" }, ...(settings?.paper_types ?? PAPER_TYPES).map(t => ({ value: t, label: t }))]}
             />
             <Select
               label="Reading Status"
@@ -356,6 +367,18 @@ function ImportPreviewPanel({
           label="Title"
           value={merged.title || ""}
           onChange={e => onEdit({ title: e.target.value })}
+        />
+        <Input
+          label="Authors (comma-separated)"
+          value={Array.isArray(merged.authors) ? merged.authors.join(", ") : ""}
+          onChange={e => onEdit({ authors: e.target.value.split(",").map((a: string) => a.trim()).filter(Boolean) })}
+          placeholder="Smith J, Jones A, ..."
+        />
+        <Input
+          label="DOI"
+          value={merged.doi || ""}
+          onChange={e => onEdit({ doi: e.target.value })}
+          placeholder="10.xxx/xxx"
         />
         <div className="grid grid-cols-2 gap-3">
           <Input label="Year" type="number" value={merged.year || ""} onChange={e => onEdit({ year: parseInt(e.target.value) || undefined })} />

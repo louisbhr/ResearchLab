@@ -16,6 +16,7 @@ import { generateTopicSummary } from '../services/aiService';
 import { Card, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Badge, ReadingStatusBadge } from '../components/ui/Badge';
+import { Input } from '../components/ui/Input';
 import { RatingBar } from '../components/ui/RatingBar';
 import { Modal } from '../components/ui/Modal';
 import { cn } from '../utils/cn';
@@ -400,6 +401,24 @@ export default function Topics() {
   const { tags, papers, loading, loadTags, loadPapers } = useAppStore();
   const [selectedTag, setSelectedTag] = useState<Tag | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [createOpen, setCreateOpen] = useState(false);
+  const [newTopicName, setNewTopicName] = useState('');
+  const [creating, setCreating] = useState(false);
+
+  async function handleCreateTopic() {
+    if (!newTopicName.trim()) return;
+    setCreating(true);
+    try {
+      await api.createTag({ name: newTopicName.trim() });
+      await loadTags();
+      setCreateOpen(false);
+      setNewTopicName('');
+    } catch (err) {
+      console.error('Failed to create topic:', err);
+    } finally {
+      setCreating(false);
+    }
+  }
 
   useEffect(() => {
     loadTags();
@@ -441,6 +460,13 @@ export default function Topics() {
                 {tags.length} topic{tags.length !== 1 ? 's' : ''} across your library
               </p>
             </div>
+            <Button
+              icon={<Plus className="w-4 h-4" />}
+              onClick={() => setCreateOpen(true)}
+              size="sm"
+            >
+              New Topic
+            </Button>
           </div>
 
           {/* Search */}
@@ -505,6 +531,32 @@ export default function Topics() {
           </div>
         </div>
       )}
+
+      <Modal
+        open={createOpen}
+        onClose={() => { setCreateOpen(false); setNewTopicName(''); }}
+        title="Create Topic"
+        size="sm"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => { setCreateOpen(false); setNewTopicName(''); }}>
+              Cancel
+            </Button>
+            <Button onClick={handleCreateTopic} loading={creating} disabled={!newTopicName.trim()}>
+              Create
+            </Button>
+          </>
+        }
+      >
+        <Input
+          label="Topic name"
+          value={newTopicName}
+          onChange={(e) => setNewTopicName(e.target.value)}
+          placeholder="e.g. Machine Learning, Cognitive Science…"
+          onKeyDown={(e) => e.key === 'Enter' && handleCreateTopic()}
+          autoFocus
+        />
+      </Modal>
     </div>
   );
 }

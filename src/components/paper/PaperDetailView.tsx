@@ -1,13 +1,128 @@
 import { useState } from "react";
-import { X, Edit, Save, RotateCcw, ExternalLink, FileText, Heart, Star, Brain, RefreshCw } from "lucide-react";
-import { Paper, PaperTag, PAPER_TYPES, READING_STATUSES } from "../../types";
+import { X, Edit, Save, RotateCcw, ExternalLink, FileText, Heart, Brain, Plus } from "lucide-react";
+import { Paper, PaperTag, Tag, PAPER_TYPES, READING_STATUSES } from "../../types";
 import { ReadingStatusBadge, PaperTypeBadge, Badge } from "../ui/Badge";
-import { RatingBar, StarRating } from "../ui/RatingBar";
+import { RatingBar } from "../ui/RatingBar";
 import { Button } from "../ui/Button";
 import { Input, Textarea, Select } from "../ui/Input";
 import { useAppStore } from "../../store/useAppStore";
 import * as api from "../../services/tauriApi";
 import { formatAuthors } from "../../utils";
+
+function EditTagsSection({
+  paperTags,
+  allTags,
+  onChange,
+}: {
+  paperTags: PaperTag[];
+  allTags: Tag[];
+  onChange: (tags: PaperTag[]) => void;
+}) {
+  const { loadTags } = useAppStore();
+  const [search, setSearch] = useState('');
+  const [creating, setCreating] = useState(false);
+  const paperTagIds = new Set(paperTags.map((t) => t.tag_id));
+
+  const toggleTag = (tag: Tag) => {
+    if (paperTagIds.has(tag.id)) {
+      onChange(paperTags.filter((t) => t.tag_id !== tag.id));
+    } else {
+      onChange([...paperTags, { tag_id: tag.id, tag_name: tag.name, rating: 3, ai_suggested: false, user_confirmed: true }]);
+    }
+  };
+
+  const updateRating = (tagId: string, rating: number) => {
+    onChange(paperTags.map((t) => t.tag_id === tagId ? { ...t, rating } : t));
+  };
+
+  const filtered = allTags.filter((t) =>
+    t.name.toLowerCase().includes(search.toLowerCase()),
+  );
+
+  const trimmed = search.trim();
+  const exactMatch = allTags.some((t) => t.name.toLowerCase() === trimmed.toLowerCase());
+  const canCreate = trimmed.length > 0 && !exactMatch;
+
+  const handleCreate = async () => {
+    if (!canCreate || creating) return;
+    setCreating(true);
+    try {
+      const newTag = await api.createTag({ name: trimmed });
+      await loadTags();
+      onChange([...paperTags, { tag_id: newTag.id, tag_name: newTag.name, rating: 3, ai_suggested: false, user_confirmed: true }]);
+      setSearch('');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      {/* Current tags with rating */}
+      {paperTags.length > 0 && (
+        <div className="space-y-2 mb-3">
+          {paperTags.map((tag) => (
+            <div key={tag.tag_id} className="flex items-center gap-2">
+              <span className="text-xs text-gray-700 w-24 shrink-0 truncate">{tag.tag_name}</span>
+              <div className="flex gap-0.5">
+                {[1,2,3,4,5].map(i => (
+                  <button
+                    key={i}
+                    onClick={() => updateRating(tag.tag_id, i)}
+                    className={`w-2.5 h-2.5 rounded-full transition-colors ${i <= tag.rating ? 'bg-cyan-500' : 'bg-gray-200 hover:bg-gray-300'}`}
+                  />
+                ))}
+              </div>
+              <button
+                onClick={() => onChange(paperTags.filter((t) => t.tag_id !== tag.tag_id))}
+                className="ml-auto p-0.5 text-gray-300 hover:text-red-400"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      {/* Tag selector */}
+      <div className="flex gap-1">
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && canCreate) handleCreate(); }}
+          placeholder="Search or create tag…"
+          className="flex-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg outline-none focus:border-cyan-300"
+        />
+        {canCreate && (
+          <button
+            onClick={handleCreate}
+            disabled={creating}
+            title={`Create tag "${trimmed}"`}
+            className="px-2 py-1.5 text-xs bg-cyan-50 text-cyan-700 border border-cyan-200 rounded-lg hover:bg-cyan-100 disabled:opacity-50"
+          >
+            <Plus className="w-3 h-3" />
+          </button>
+        )}
+      </div>
+      {search && (
+        <div className="border border-gray-100 rounded-lg max-h-32 overflow-auto">
+          {filtered.slice(0, 8).map((tag) => (
+            <button
+              key={tag.id}
+              onClick={() => { toggleTag(tag); setSearch(''); }}
+              className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs hover:bg-gray-50"
+            >
+              <span className={paperTagIds.has(tag.id) ? 'font-medium text-cyan-700' : 'text-gray-700'}>
+                {tag.name}
+              </span>
+              {paperTagIds.has(tag.id) && <span className="text-cyan-500 text-[10px]">✓</span>}
+            </button>
+          ))}
+          {filtered.length === 0 && !canCreate && <p className="text-xs text-gray-400 px-2.5 py-1.5">No matching tags</p>}
+        </div>
+      )}
+    </div>
+  );
+}
 
 interface PaperDetailViewProps {
   paper?: Paper;
@@ -19,10 +134,10 @@ export default function PaperDetailView({ paper: paperProp, open = true, onClose
   const { papers, selectedPaperId } = useAppStore();
   const paper = paperProp || papers.find(p => p.id === selectedPaperId);
   if (!open || !paper) return null;
-  const { updatePaper, tags } = useAppStore();
+  const { updatePaper, tags, projects, settings } = useAppStore();
+  const paperTypes = settings?.paper_types ?? (PAPER_TYPES as unknown as string[]);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [analyzeLoading, setAnalyzeLoading] = useState(false);
   const [editData, setEditData] = useState({ ...paper });
 
   const handleSave = async () => {
@@ -81,7 +196,17 @@ export default function PaperDetailView({ paper: paperProp, open = true, onClose
             ) : (
               <h2 className="text-base font-semibold text-gray-800 leading-snug">{paper.title}</h2>
             )}
-            <p className="text-sm text-gray-500 mt-1">{authorStr}</p>
+            {editing ? (
+              <Input
+                label="Authors (comma-separated)"
+                value={Array.isArray(editData.authors) ? editData.authors.join(", ") : ""}
+                onChange={e => setEditData(d => ({ ...d, authors: e.target.value.split(",").map((a: string) => a.trim()).filter(Boolean) }))}
+                placeholder="Smith J, Jones A, ..."
+                className="mt-2 text-sm"
+              />
+            ) : (
+              <p className="text-sm text-gray-500 mt-1">{authorStr}</p>
+            )}
             {paper.year && <span className="text-xs text-gray-400">{paper.year}</span>}
             {paper.journal && (
               <span className="text-xs text-gray-500 ml-2">· {paper.journal}</span>
@@ -123,11 +248,15 @@ export default function PaperDetailView({ paper: paperProp, open = true, onClose
           <div className="flex items-center gap-1.5">
             <span className="text-xs text-gray-500">Relevance:</span>
             {editing ? (
-              <StarRating
-                value={editData.relevance_rating || 0}
-                onChange={v => setEditData(d => ({ ...d, relevance_rating: v }))}
-                max={5}
-              />
+              <div className="flex gap-0.5 items-center">
+                {[1,2,3,4,5].map(i => (
+                  <button
+                    key={i}
+                    onClick={() => setEditData(d => ({ ...d, relevance_rating: i === d.relevance_rating ? 0 : i }))}
+                    className={`w-3 h-3 rounded-full transition-colors ${i <= (editData.relevance_rating || 0) ? 'bg-cyan-500' : 'bg-gray-200 hover:bg-gray-300'}`}
+                  />
+                ))}
+              </div>
             ) : (
               <div className="flex gap-0.5">
                 {Array.from({ length: 5 }).map((_, i) => (
@@ -194,7 +323,7 @@ export default function PaperDetailView({ paper: paperProp, open = true, onClose
                     label="Paper Type"
                     value={editData.paper_type || ""}
                     onChange={e => setEditData(d => ({ ...d, paper_type: e.target.value }))}
-                    options={[{ value: "", label: "— Select type —" }, ...PAPER_TYPES.map(t => ({ value: t, label: t }))]}
+                    options={[{ value: "", label: "— Select type —" }, ...paperTypes.map(t => ({ value: t, label: t }))]}
                   />
                 </div>
               )}
@@ -269,22 +398,30 @@ export default function PaperDetailView({ paper: paperProp, open = true, onClose
               {/* Tags */}
               <div>
                 <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Tags</h4>
-                {paper.tags.length === 0 ? (
-                  <p className="text-sm text-gray-400 italic">No tags assigned.</p>
+                {editing ? (
+                  <EditTagsSection
+                    paperTags={editData.tags}
+                    allTags={tags}
+                    onChange={newTags => setEditData(d => ({ ...d, tags: newTags }))}
+                  />
                 ) : (
-                  <div className="space-y-2">
-                    {paper.tags.map(tag => (
-                      <div key={tag.tag_id} className="flex items-center gap-3">
-                        <span className="text-xs font-medium text-gray-700 w-28 shrink-0">{tag.tag_name}</span>
-                        <div className="flex-1">
-                          <RatingBar rating={tag.rating} showLabel />
+                  paper.tags.length === 0 ? (
+                    <p className="text-sm text-gray-400 italic">No tags assigned.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {paper.tags.map(tag => (
+                        <div key={tag.tag_id} className="flex items-center gap-3">
+                          <span className="text-xs font-medium text-gray-700 w-28 shrink-0">{tag.tag_name}</span>
+                          <div className="flex-1">
+                            <RatingBar rating={tag.rating} showLabel />
+                          </div>
+                          {tag.ai_suggested && !tag.user_confirmed && (
+                            <Badge variant="tag" className="text-[10px]">AI</Badge>
+                          )}
                         </div>
-                        {tag.ai_suggested && !tag.user_confirmed && (
-                          <Badge variant="tag" className="text-[10px]">AI</Badge>
-                        )}
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  )
                 )}
               </div>
             </div>
@@ -310,16 +447,46 @@ export default function PaperDetailView({ paper: paperProp, open = true, onClose
                 <Badge variant="source">{paper.source_type}</Badge>
               </div>
 
-              {paper.project_ids.length > 0 && (
-                <div>
-                  <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Projects</p>
+              <div>
+                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Projects</p>
+                {editing ? (
                   <div className="space-y-1">
-                    {paper.project_ids.map(pid => (
-                      <div key={pid} className="text-xs text-gray-600">·</div>
+                    {projects.map(proj => (
+                      <label key={proj.id} className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={editData.project_ids?.includes(proj.id) ?? false}
+                          onChange={e => {
+                            const ids = editData.project_ids || [];
+                            setEditData(d => ({
+                              ...d,
+                              project_ids: e.target.checked
+                                ? [...ids, proj.id]
+                                : ids.filter(id => id !== proj.id),
+                            }));
+                          }}
+                          className="w-3 h-3 rounded accent-cyan-500"
+                        />
+                        <span className="text-xs text-gray-600 truncate">{proj.name}</span>
+                      </label>
                     ))}
+                    {projects.length === 0 && <p className="text-xs text-gray-400">No projects yet.</p>}
                   </div>
-                </div>
-              )}
+                ) : (
+                  <div className="space-y-1">
+                    {paper.project_ids.length === 0 ? (
+                      <p className="text-xs text-gray-400 italic">None</p>
+                    ) : (
+                      paper.project_ids.map(pid => {
+                        const proj = projects.find(p => p.id === pid);
+                        return (
+                          <div key={pid} className="text-xs text-gray-600">· {proj?.name ?? pid}</div>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
