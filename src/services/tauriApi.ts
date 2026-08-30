@@ -249,6 +249,10 @@ export async function testApiConnection(): Promise<boolean> {
   return invoke<boolean>('test_api_connection');
 }
 
+export async function savePaperTypes(types: string[]): Promise<void> {
+  return invoke<void>('save_paper_types', { types });
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Analytics
 // ─────────────────────────────────────────────────────────────────────────────

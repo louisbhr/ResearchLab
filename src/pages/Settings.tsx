@@ -8,12 +8,16 @@ import {
   Database,
   Info,
   Settings as SettingsIcon,
+  Tag,
+  Plus,
+  X,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Select } from '../components/ui/Input';
 import { useAppStore } from '../store/useAppStore';
 import * as api from '../services/tauriApi';
+import { PAPER_TYPES } from '../types';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -46,6 +50,11 @@ export default function Settings() {
   const [selectedModel, setSelectedModel] = useState('claude-sonnet-4-6');
   const [savingModel, setSavingModel] = useState(false);
 
+  // Paper types
+  const [paperTypes, setPaperTypes] = useState<string[]>([]);
+  const [newType, setNewType] = useState('');
+  const [savingTypes, setSavingTypes] = useState(false);
+
   useEffect(() => {
     loadSettings();
   }, [loadSettings]);
@@ -55,6 +64,12 @@ export default function Settings() {
       setSelectedModel(settings.claude_model);
     }
   }, [settings?.claude_model]);
+
+  useEffect(() => {
+    if (settings?.paper_types) {
+      setPaperTypes(settings.paper_types);
+    }
+  }, [settings?.paper_types]);
 
   // ── Handlers ─────────────────────────────────────────────────────────────
 
@@ -99,6 +114,45 @@ export default function Settings() {
       await loadSettings();
     } finally {
       setSavingModel(false);
+    }
+  }
+
+  async function handleAddType() {
+    const trimmed = newType.trim();
+    if (!trimmed || paperTypes.includes(trimmed)) return;
+    const updated = [...paperTypes, trimmed];
+    setSavingTypes(true);
+    try {
+      await api.savePaperTypes(updated);
+      setPaperTypes(updated);
+      setNewType('');
+      await loadSettings();
+    } finally {
+      setSavingTypes(false);
+    }
+  }
+
+  async function handleRemoveType(type: string) {
+    const updated = paperTypes.filter((t) => t !== type);
+    setSavingTypes(true);
+    try {
+      await api.savePaperTypes(updated);
+      setPaperTypes(updated);
+      await loadSettings();
+    } finally {
+      setSavingTypes(false);
+    }
+  }
+
+  async function handleResetTypes() {
+    const defaults = PAPER_TYPES as unknown as string[];
+    setSavingTypes(true);
+    try {
+      await api.savePaperTypes(defaults);
+      setPaperTypes([...defaults]);
+      await loadSettings();
+    } finally {
+      setSavingTypes(false);
     }
   }
 
@@ -254,6 +308,71 @@ export default function Settings() {
                 {settings?.pdf_storage_path ?? '—'}
               </p>
             </div>
+          </div>
+        </Card>
+
+        {/* ── Paper Types ───────────────────────────────────────────────── */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Paper Types</CardTitle>
+            <div className="w-7 h-7 bg-cyan-50 rounded-lg flex items-center justify-center">
+              <Tag className="w-3.5 h-3.5 text-cyan-600" />
+            </div>
+          </CardHeader>
+          <div className="space-y-4">
+            <p className="text-xs text-gray-500">
+              Customize the list of paper types available in dropdowns throughout the app.
+            </p>
+
+            {/* Current types */}
+            <div className="flex flex-wrap gap-1.5">
+              {paperTypes.map((type) => (
+                <span
+                  key={type}
+                  className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded-lg"
+                >
+                  {type}
+                  <button
+                    onClick={() => handleRemoveType(type)}
+                    disabled={savingTypes}
+                    className="text-gray-400 hover:text-red-500 transition-colors ml-0.5"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              ))}
+              {paperTypes.length === 0 && (
+                <p className="text-xs text-gray-400 italic">No types defined.</p>
+              )}
+            </div>
+
+            {/* Add new type */}
+            <div className="flex gap-2">
+              <input
+                value={newType}
+                onChange={(e) => setNewType(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleAddType()}
+                placeholder="Add a new type…"
+                className="flex-1 px-3 py-2 text-sm rounded-lg border border-gray-200 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100 outline-none"
+              />
+              <Button
+                onClick={handleAddType}
+                disabled={!newType.trim() || paperTypes.includes(newType.trim()) || savingTypes}
+                loading={savingTypes}
+                size="sm"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Add
+              </Button>
+            </div>
+
+            <button
+              onClick={handleResetTypes}
+              disabled={savingTypes}
+              className="text-xs text-gray-400 hover:text-gray-600 underline"
+            >
+              Reset to defaults
+            </button>
           </div>
         </Card>
 

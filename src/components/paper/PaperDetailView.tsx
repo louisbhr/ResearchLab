@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { X, Edit, Save, RotateCcw, ExternalLink, FileText, Heart, Brain } from "lucide-react";
+import { X, Edit, Save, RotateCcw, ExternalLink, FileText, Heart, Brain, Plus } from "lucide-react";
 import { Paper, PaperTag, Tag, PAPER_TYPES, READING_STATUSES } from "../../types";
 import { ReadingStatusBadge, PaperTypeBadge, Badge } from "../ui/Badge";
 import { RatingBar } from "../ui/RatingBar";
@@ -18,7 +18,9 @@ function EditTagsSection({
   allTags: Tag[];
   onChange: (tags: PaperTag[]) => void;
 }) {
+  const { loadTags } = useAppStore();
   const [search, setSearch] = useState('');
+  const [creating, setCreating] = useState(false);
   const paperTagIds = new Set(paperTags.map((t) => t.tag_id));
 
   const toggleTag = (tag: Tag) => {
@@ -36,6 +38,23 @@ function EditTagsSection({
   const filtered = allTags.filter((t) =>
     t.name.toLowerCase().includes(search.toLowerCase()),
   );
+
+  const trimmed = search.trim();
+  const exactMatch = allTags.some((t) => t.name.toLowerCase() === trimmed.toLowerCase());
+  const canCreate = trimmed.length > 0 && !exactMatch;
+
+  const handleCreate = async () => {
+    if (!canCreate || creating) return;
+    setCreating(true);
+    try {
+      const newTag = await api.createTag({ name: trimmed });
+      await loadTags();
+      onChange([...paperTags, { tag_id: newTag.id, tag_name: newTag.name, rating: 3, ai_suggested: false, user_confirmed: true }]);
+      setSearch('');
+    } finally {
+      setCreating(false);
+    }
+  };
 
   return (
     <div className="space-y-2">
@@ -65,12 +84,25 @@ function EditTagsSection({
         </div>
       )}
       {/* Tag selector */}
-      <input
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        placeholder="Add tags…"
-        className="w-full text-xs px-2 py-1.5 border border-gray-200 rounded-lg outline-none focus:border-cyan-300"
-      />
+      <div className="flex gap-1">
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && canCreate) handleCreate(); }}
+          placeholder="Search or create tag…"
+          className="flex-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg outline-none focus:border-cyan-300"
+        />
+        {canCreate && (
+          <button
+            onClick={handleCreate}
+            disabled={creating}
+            title={`Create tag "${trimmed}"`}
+            className="px-2 py-1.5 text-xs bg-cyan-50 text-cyan-700 border border-cyan-200 rounded-lg hover:bg-cyan-100 disabled:opacity-50"
+          >
+            <Plus className="w-3 h-3" />
+          </button>
+        )}
+      </div>
       {search && (
         <div className="border border-gray-100 rounded-lg max-h-32 overflow-auto">
           {filtered.slice(0, 8).map((tag) => (
@@ -85,7 +117,7 @@ function EditTagsSection({
               {paperTagIds.has(tag.id) && <span className="text-cyan-500 text-[10px]">✓</span>}
             </button>
           ))}
-          {filtered.length === 0 && <p className="text-xs text-gray-400 px-2.5 py-1.5">No matching tags</p>}
+          {filtered.length === 0 && !canCreate && <p className="text-xs text-gray-400 px-2.5 py-1.5">No matching tags</p>}
         </div>
       )}
     </div>
@@ -102,7 +134,8 @@ export default function PaperDetailView({ paper: paperProp, open = true, onClose
   const { papers, selectedPaperId } = useAppStore();
   const paper = paperProp || papers.find(p => p.id === selectedPaperId);
   if (!open || !paper) return null;
-  const { updatePaper, tags, projects } = useAppStore();
+  const { updatePaper, tags, projects, settings } = useAppStore();
+  const paperTypes = settings?.paper_types ?? (PAPER_TYPES as unknown as string[]);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editData, setEditData] = useState({ ...paper });
@@ -290,7 +323,7 @@ export default function PaperDetailView({ paper: paperProp, open = true, onClose
                     label="Paper Type"
                     value={editData.paper_type || ""}
                     onChange={e => setEditData(d => ({ ...d, paper_type: e.target.value }))}
-                    options={[{ value: "", label: "— Select type —" }, ...PAPER_TYPES.map(t => ({ value: t, label: t }))]}
+                    options={[{ value: "", label: "— Select type —" }, ...paperTypes.map(t => ({ value: t, label: t }))]}
                   />
                 </div>
               )}

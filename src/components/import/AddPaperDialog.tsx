@@ -86,11 +86,16 @@ export default function AddPaperDialog({ open = true, onClose }: AddPaperDialogP
   const handleRunAI = async (titleVal: string, abstractVal: string, authors: string[], year?: number | null, journal?: string | null) => {
     if (!settings?.claude_api_key_set) return;
     setAiLoading(true);
+    setError(null);
     try {
-      const result = await analyzeImportedPaper({ title: titleVal, abstract_text: abstractVal, authors, year: year ?? mergedPreview.year, journal: journal ?? mergedPreview.journal }, tags);
+      const result = await analyzeImportedPaper(
+        { title: titleVal, abstract_text: abstractVal, authors, year: year ?? mergedPreview.year, journal: journal ?? mergedPreview.journal },
+        tags,
+        settings?.paper_types,
+      );
       setAiResult(result);
-    } catch (e) {
-      console.error("AI analysis failed:", e);
+    } catch (e: any) {
+      setError(`AI analysis failed: ${e?.message ?? e}`);
     } finally {
       setAiLoading(false);
     }
@@ -261,7 +266,7 @@ export default function AddPaperDialog({ open = true, onClose }: AddPaperDialogP
               label="Paper Type"
               value={manual.paper_type}
               onChange={e => setManual(m => ({ ...m, paper_type: e.target.value }))}
-              options={[{ value: "", label: "— Select —" }, ...PAPER_TYPES.map(t => ({ value: t, label: t }))]}
+              options={[{ value: "", label: "— Select —" }, ...(settings?.paper_types ?? PAPER_TYPES).map(t => ({ value: t, label: t }))]}
             />
             <Select
               label="Reading Status"

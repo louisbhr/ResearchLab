@@ -10,7 +10,10 @@
     "dialog:allow-save",
     "shell:allow-open",
     "http:default",
-    "http:allow-fetch",
+    {
+      "identifier": "http:allow-fetch",
+      "allow": [{ "url": "https://api.anthropic.com/**" }]
+    },
     "fs:default",
     "fs:allow-appdata-read-recursive",
     "fs:allow-appdata-write-recursive",

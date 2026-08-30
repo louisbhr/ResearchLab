@@ -14,6 +14,7 @@ import { PAPER_TYPES, READING_STATUSES, SORT_OPTIONS } from '../types';
 import AddPaperDialog from '../components/import/AddPaperDialog';
 import PaperDetailView from '../components/paper/PaperDetailView';
 import { debounce } from '../utils';
+import * as api from '../services/tauriApi';
 
 // ── Relevance dots ────────────────────────────────────────────────────────────
 function RelevanceDots({ rating }: { rating?: number | null }) {
@@ -54,6 +55,11 @@ function TableSkeleton() {
   );
 }
 
+// ── Default column widths (px) ────────────────────────────────────────────────
+const DEFAULT_COL_WIDTHS = [280, 160, 48, 140, 160, 120, 120, 80, 32];
+const COL_LABELS = ['Title', 'Authors', 'Year', 'Journal', 'Tags', 'Type', 'Status', 'Relevance', ''];
+const COL_MIN = [80, 60, 36, 60, 80, 60, 60, 50, 32];
+
 // ── Main component ────────────────────────────────────────────────────────────
 export default function Library() {
   const {
@@ -71,6 +77,28 @@ export default function Library() {
 
   const [addOpen, setAddOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState(filter.search_query ?? '');
+  const [colWidths, setColWidths] = useState(DEFAULT_COL_WIDTHS);
+  const resizeDrag = useRef<{ idx: number; startX: number; startW: number } | null>(null);
+
+  const gridCols = colWidths.map((w) => `${w}px`).join(' ');
+
+  const startResize = (idx: number, e: React.MouseEvent) => {
+    e.preventDefault();
+    resizeDrag.current = { idx, startX: e.clientX, startW: colWidths[idx] };
+    const onMove = (ev: MouseEvent) => {
+      if (!resizeDrag.current) return;
+      const { idx, startX, startW } = resizeDrag.current;
+      const next = Math.max(COL_MIN[idx], startW + ev.clientX - startX);
+      setColWidths((prev) => { const a = [...prev]; a[idx] = next; return a; });
+    };
+    const onUp = () => {
+      resizeDrag.current = null;
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  };
 
   // Sync search query to store with debounce
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -344,18 +372,25 @@ export default function Library() {
             )}
           </div>
         ) : (
-          <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-x-auto">
             {/* Table header */}
-            <div className="grid grid-cols-[1fr_160px_48px_140px_160px_120px_120px_80px_32px] gap-x-3 px-4 py-2.5 bg-gray-50 border-b border-gray-100 text-xs font-semibold text-gray-500 uppercase tracking-wide">
-              <span>Title</span>
-              <span>Authors</span>
-              <span>Year</span>
-              <span>Journal</span>
-              <span>Tags</span>
-              <span>Type</span>
-              <span>Status</span>
-              <span>Relevance</span>
-              <span />
+            <div
+              className="grid px-4 py-2.5 bg-gray-50 border-b border-gray-100 text-xs font-semibold text-gray-500 uppercase tracking-wide select-none"
+              style={{ gridTemplateColumns: gridCols }}
+            >
+              {COL_LABELS.map((label, idx) => (
+                <div key={idx} className="relative flex items-center min-w-0 overflow-visible">
+                  <span className="truncate">{label}</span>
+                  {idx < COL_LABELS.length - 1 && (
+                    <div
+                      onMouseDown={(e) => startResize(idx, e)}
+                      className="absolute right-0 top-0 h-full w-3 cursor-col-resize flex items-center justify-center group z-10"
+                    >
+                      <div className="w-px h-3 bg-gray-300 group-hover:bg-cyan-400 group-hover:h-full transition-all" />
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
 
             {/* Table rows */}
@@ -363,6 +398,7 @@ export default function Library() {
               <PaperRow
                 key={paper.id}
                 paper={paper}
+                gridCols={gridCols}
                 selected={paper.id === selectedPaperId}
                 onClick={() => setSelectedPaper(paper.id)}
               />
@@ -385,13 +421,17 @@ export default function Library() {
 
 // ── Tag popover ────────────────────────────────────────────────────────────────
 function TagPopover({ paper, allTags, onClose }: { paper: Paper; allTags: Tag[]; onClose: () => void }) {
-  const { updatePaper } = useAppStore();
+  const { updatePaper, loadTags } = useAppStore();
   const [search, setSearch] = useState('');
+  const [creating, setCreating] = useState(false);
 
   const paperTagIds = new Set(paper.tags.map((t) => t.tag_id));
   const filtered = allTags.filter((t) =>
     t.name.toLowerCase().includes(search.toLowerCase()),
   );
+  const trimmed = search.trim();
+  const exactMatch = allTags.some((t) => t.name.toLowerCase() === trimmed.toLowerCase());
+  const canCreate = trimmed.length > 0 && !exactMatch;
 
   const toggleTag = async (tag: Tag) => {
     let newTags;
@@ -422,6 +462,29 @@ function TagPopover({ paper, allTags, onClose }: { paper: Paper; allTags: Tag[];
     await updatePaper({ id: paper.id, tags: newTags });
   };
 
+  const handleCreateAndAdd = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!canCreate || creating) return;
+    setCreating(true);
+    try {
+      const newTag = await api.createTag({ name: trimmed });
+      await loadTags();
+      await updatePaper({
+        id: paper.id,
+        tags: [
+          ...paper.tags.map((t) => ({
+            tag_id: t.tag_id, tag_name: t.tag_name, rating: t.rating,
+            ai_suggested: t.ai_suggested, user_confirmed: t.user_confirmed, reason: t.reason,
+          })),
+          { tag_name: newTag.name, tag_id: newTag.id, rating: 3, ai_suggested: false, user_confirmed: true },
+        ],
+      });
+      setSearch('');
+    } finally {
+      setCreating(false);
+    }
+  };
+
   return (
     <div className="absolute z-50 left-0 top-full mt-1 bg-white rounded-xl shadow-xl border border-gray-100 w-56 py-2">
       <div className="px-2 pb-2">
@@ -429,29 +492,70 @@ function TagPopover({ paper, allTags, onClose }: { paper: Paper; allTags: Tag[];
           autoFocus
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search tags…"
+          onKeyDown={(e) => { if (e.key === 'Enter' && canCreate) handleCreateAndAdd(e as any); e.stopPropagation(); }}
+          placeholder="Search or create tag…"
           onClick={(e) => e.stopPropagation()}
           className="w-full text-xs px-2 py-1.5 border border-gray-200 rounded-lg outline-none focus:border-cyan-300"
         />
       </div>
       <div className="max-h-48 overflow-auto">
-        {filtered.length === 0 && (
+        {canCreate && (
+          <button
+            onClick={handleCreateAndAdd}
+            disabled={creating}
+            className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-cyan-50 text-xs text-cyan-700 font-medium border-b border-gray-50"
+          >
+            <Plus className="w-3 h-3 flex-shrink-0" />
+            {creating ? 'Creating…' : `Create "${trimmed}"`}
+          </button>
+        )}
+        {filtered.length === 0 && !canCreate && (
           <p className="text-xs text-gray-400 text-center py-2">No tags found</p>
         )}
-        {filtered.map((tag) => (
-          <button
-            key={tag.id}
-            onClick={(e) => { e.stopPropagation(); toggleTag(tag); }}
-            className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-gray-50 text-xs"
-          >
-            <span className={paperTagIds.has(tag.id) ? 'font-medium text-cyan-700' : 'text-gray-700'}>
-              {tag.name}
-            </span>
-            {paperTagIds.has(tag.id) && (
-              <span className="w-3.5 h-3.5 rounded-full bg-cyan-500 flex-shrink-0" />
-            )}
-          </button>
-        ))}
+        {filtered.map((tag) => {
+          const isSelected = paperTagIds.has(tag.id);
+          const currentTag = paper.tags.find((t) => t.tag_id === tag.id);
+          const currentRating = currentTag?.rating ?? 3;
+          return (
+            <div
+              key={tag.id}
+              className="flex items-center px-3 py-1.5 hover:bg-gray-50"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                onClick={(e) => { e.stopPropagation(); toggleTag(tag); }}
+                className="flex-1 text-left text-xs min-w-0"
+              >
+                <span className={isSelected ? 'font-medium text-cyan-700' : 'text-gray-700'}>
+                  {tag.name}
+                </span>
+              </button>
+              {isSelected && (
+                <div className="flex gap-0.5 mx-2">
+                  {[1, 2, 3, 4, 5].map((i) => (
+                    <button
+                      key={i}
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        const newTags = paper.tags.map((t) =>
+                          t.tag_id === tag.id
+                            ? { tag_id: t.tag_id, tag_name: t.tag_name, rating: i, ai_suggested: t.ai_suggested, user_confirmed: t.user_confirmed, reason: t.reason }
+                            : { tag_id: t.tag_id, tag_name: t.tag_name, rating: t.rating, ai_suggested: t.ai_suggested, user_confirmed: t.user_confirmed, reason: t.reason }
+                        );
+                        await updatePaper({ id: paper.id, tags: newTags });
+                      }}
+                      className={cn(
+                        'w-2 h-2 rounded-full transition-colors',
+                        i <= currentRating ? 'bg-cyan-500' : 'bg-gray-200 hover:bg-gray-300',
+                      )}
+                    />
+                  ))}
+                </div>
+              )}
+              {isSelected && <span className="w-3 h-3 rounded-full bg-cyan-500 flex-shrink-0" />}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -462,12 +566,15 @@ function PaperRow({
   paper,
   selected,
   onClick,
+  gridCols,
 }: {
   paper: Paper;
   selected: boolean;
   onClick: () => void;
+  gridCols: string;
 }) {
-  const { updatePaper, tags: allTags } = useAppStore();
+  const { updatePaper, tags: allTags, settings } = useAppStore();
+  const paperTypes = settings?.paper_types ?? PAPER_TYPES;
   const [tagsOpen, setTagsOpen] = useState(false);
   const tagsRef = useRef<HTMLDivElement>(null);
 
@@ -486,10 +593,11 @@ function PaperRow({
     <div
       onClick={onClick}
       className={cn(
-        'grid grid-cols-[1fr_160px_48px_140px_160px_120px_120px_80px_32px] gap-x-3 px-4 py-3',
+        'grid px-4 py-3',
         'border-b border-gray-50 last:border-b-0 cursor-pointer transition-colors text-sm',
         selected ? 'bg-cyan-50' : 'hover:bg-gray-50',
       )}
+      style={{ gridTemplateColumns: gridCols }}
     >
       {/* Title */}
       <span className="font-medium text-gray-800 truncate" title={paper.title}>
@@ -541,7 +649,7 @@ function PaperRow({
           className="text-xs rounded-md border border-gray-200 bg-white py-0.5 px-1.5 cursor-pointer hover:border-cyan-300 outline-none max-w-[112px] truncate"
         >
           <option value="">— none —</option>
-          {PAPER_TYPES.map((t) => (
+          {paperTypes.map((t) => (
             <option key={t} value={t}>{t}</option>
           ))}
         </select>

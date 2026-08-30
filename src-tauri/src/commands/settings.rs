@@ -4,6 +4,12 @@ use crate::services::settings_service;
 use serde::{Deserialize, Serialize};
 use reqwest;
 
+const DEFAULT_PAPER_TYPES: &[&str] = &[
+    "Empirical Study", "Review / Survey", "Meta-Analysis", "Theoretical",
+    "Methodology", "Case Study", "Technical Report", "Conference Paper",
+    "Book Chapter", "Preprint", "Other",
+];
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AppSettings {
     pub claude_api_key_set: bool,
@@ -12,6 +18,7 @@ pub struct AppSettings {
     pub db_path: String,
     pub theme: String,
     pub app_version: String,
+    pub paper_types: Vec<String>,
 }
 
 #[tauri::command]
@@ -26,6 +33,10 @@ pub async fn get_settings(state: State<'_, AppState>) -> Result<AppSettings, Str
     let theme = settings_service::get_setting(&conn, "theme")
         .unwrap_or(None)
         .unwrap_or_else(|| "light".to_string());
+    let paper_types = settings_service::get_setting(&conn, "paper_types")
+        .unwrap_or(None)
+        .and_then(|json| serde_json::from_str::<Vec<String>>(&json).ok())
+        .unwrap_or_else(|| DEFAULT_PAPER_TYPES.iter().map(|s| s.to_string()).collect());
 
     Ok(AppSettings {
         claude_api_key_set: has_key,
@@ -34,7 +45,16 @@ pub async fn get_settings(state: State<'_, AppState>) -> Result<AppSettings, Str
         db_path: crate::db::get_db_path().to_string_lossy().to_string(),
         theme,
         app_version: "1.0.0".to_string(),
+        paper_types,
     })
+}
+
+#[tauri::command]
+pub async fn save_paper_types(types: Vec<String>, state: State<'_, AppState>) -> Result<(), String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let json = serde_json::to_string(&types).map_err(|e| e.to_string())?;
+    settings_service::set_setting(&conn, "paper_types", &json)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
